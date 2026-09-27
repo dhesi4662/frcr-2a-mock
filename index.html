@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>FRCR 2A Mock Examination Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --brand:#476f86;
+      --brand-dark:#355668;
+      --muted:#f0f0f0;
+      --border:#ccc;
+      --good:#0a7d32;
+      --bad:#b00020;
+      --card:#f9f9f9;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Arial, Helvetica, sans-serif; min-height:100vh; background:#fff; color:#111; }
+    .hidden { display:none !important; }
+
+    /* Pre-exam screens */
+    .screen { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
+    .panel { width:min(760px, 96vw); background:var(--card); border:1px solid #ddd; border-radius:12px; box-shadow:0 8px 30px rgba(0,0,0,.10); overflow:hidden; }
+    .panel-head { background:var(--brand); color:#fff; padding:20px 24px; }
+    .panel-head h1, .panel-head h2 { margin:0; }
+    .panel-body { padding:24px; }
+    .field { margin-bottom:14px; }
+    .field label { display:block; font-weight:700; margin-bottom:6px; }
+    .field input { width:100%; padding:11px 12px; border:1px solid var(--border); border-radius:7px; font-size:15px; }
+    .primary { background:var(--brand); color:#fff; border:0; border-radius:7px; padding:11px 16px; cursor:pointer; font-weight:700; }
+    .primary:hover { background:var(--brand-dark); }
+    .secondary { background:#eee; color:#111; border:1px solid var(--border); border-radius:7px; padding:11px 16px; cursor:pointer; }
+    .error { color:var(--bad); min-height:20px; margin-top:8px; }
+
+    .exam-grid { display:grid; gap:14px; }
+    .exam-card { border:1px solid var(--border); background:#fff; border-radius:10px; padding:16px; display:flex; justify-content:space-between; align-items:center; gap:16px; }
+    .exam-card h3 { margin:0 0 6px; }
+    .exam-card p { margin:3px 0; color:#555; }
+    .exam-card .actions { flex:0 0 auto; }
+    .upload-box { border-top:1px solid #ddd; margin-top:18px; padding-top:18px; }
+    .upload-box input[type=file] { width:100%; margin:8px 0 10px; }
+
+    .instructions { font-size:17px; line-height:1.55; }
+    .instructions ol { padding-left:26px; }
+    .instructions li { margin-bottom:18px; }
+    .instruction-footer { margin-top:24px; font-weight:700; }
+    .arrow-start { font-size:30px; line-height:1; padding:8px 18px; }
+    .instruction-actions { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:24px; }
+
+    /* Exam shell */
+    #exam-shell { display:none; height:100vh; }
+    #sidebar { width:230px; background:var(--muted); padding:10px; overflow-y:auto; border-right:1px solid var(--border); }
+    #sidebar h3 { margin:0 0 8px; font-size:16px; }
+    .sidebar-btn { display:block; width:100%; text-align:left; margin:5px 0; padding:8px; background:white; border:1px solid var(--border); cursor:pointer; border-radius:6px; transition:background .15s ease,color .15s ease,opacity .15s ease; }
+    .sidebar-btn.answered { background:var(--brand); color:white; }
+    .sidebar-btn.flagged::after { content:" 🚩"; }
+    .sidebar-btn.unanswered { background:#e7e7e7; color:#666; }
+    .sidebar-btn:disabled { opacity:.7; cursor:not-allowed; }
+    .filter-wrap { display:flex; gap:6px; margin-bottom:8px; flex-wrap:wrap; align-items:center; }
+    .seg { display:grid; grid-template-columns:repeat(3,1fr); border:1px solid var(--border); border-radius:8px; overflow:hidden; background:#fff; }
+    .seg button { border:0; background:none; padding:6px 8px; cursor:pointer; font-size:12px; }
+    .seg button[aria-pressed="true"] { background:var(--brand); color:#fff; font-weight:600; }
+    .filter-count { font-size:11px; opacity:.7; margin-left:auto; }
+
+    #main { flex:1; display:flex; flex-direction:column; min-width:0; }
+    #header { background:var(--brand); color:white; padding:10px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+    #toolbar { display:flex; align-items:center; gap:8px; }
+    .icon-btn { background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.35); border-radius:8px; cursor:pointer; font-size:18px; padding:6px 10px; }
+    .icon-btn.flagged { color:#ffb3b3; }
+    .icon-btn:disabled { opacity:.5; cursor:not-allowed; }
+    .finish-btn { background:#fff; color:#000; font-weight:600; }
+    #question-container { flex:1; padding:20px; overflow:auto; }
+    #question { font-size:18px; margin:0 0 16px; }
+    .option-container { display:flex; align-items:center; gap:10px; margin:8px 0; background:white; padding:10px; border-radius:6px; border:1px solid var(--border); cursor:pointer; }
+    .option-container input { margin-top:2px; }
+    .option-label { user-select:none; flex:1; }
+    .option-label.strike { text-decoration:line-through; color:#888; }
+    .strike-chip { font-family:monospace; color:#888; cursor:pointer; }
+    .controls { padding:10px; display:flex; justify-content:space-between; gap:8px; border-top:1px solid var(--border); }
+    .btn { padding:10px 14px; cursor:pointer; border:1px solid var(--border); border-radius:6px; background:#eee; }
+    .btn:disabled { background:#ccc; cursor:not-allowed; }
+
+    /* Review */
+    #review-page { display:none; min-height:100vh; width:100%; }
+    #review-header { background:var(--brand); color:#fff; padding:14px; }
+    #scoreline { font-weight:700; }
+    #submission-status { margin-top:6px; font-size:13px; opacity:.95; }
+    #review-wrap { padding:16px; }
+    table { width:100%; border-collapse:collapse; }
+    th,td { padding:8px; border-bottom:1px solid var(--border); vertical-align:top; text-align:left; }
+    .correct { color:var(--good); font-weight:700; }
+    .incorrect { color:var(--bad); font-weight:700; }
+    .controls-review { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+
+    /* Modal */
+    .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; align-items:center; justify-content:center; z-index:10000; }
+    .modal { background:#fff; max-width:520px; width:92%; border-radius:10px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,.3); }
+    .modal header { background:var(--brand); color:#fff; padding:12px 16px; font-weight:700; }
+    .modal .body { padding:16px; }
+    .modal .actions { display:flex; gap:8px; justify-content:flex-end; padding:12px 16px; border-top:1px solid var(--border); }
+
+    @media (max-width:760px) {
+      #sidebar { width:155px; }
+      .exam-card { align-items:flex-start; flex-direction:column; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Welcome / Login -->
+  <section id="welcome-screen" class="screen">
+    <div class="panel">
+      <div class="panel-head"><h1>FRCR Part 2A Mock Examination</h1></div>
+      <div class="panel-body">
+        <div class="field">
+          <label for="candidate-name">Candidate name</label>
+          <input id="candidate-name" type="text" autocomplete="name" placeholder="Enter your name" />
+        </div>
+        <div class="field">
+          <label for="candidate-password">Password</label>
+          <input id="candidate-password" type="password" placeholder="Password" />
+        </div>
+        <button id="continue-login" class="primary">Continue</button>
+        <div id="login-error" class="error"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Exam selection -->
+  <section id="selection-screen" class="screen hidden">
+    <div class="panel">
+      <div class="panel-head"><h2>Select examination</h2></div>
+      <div class="panel-body">
+        <div class="exam-grid">
+          <div class="exam-card">
+            <div>
+              <h3>FRCR 2A Mock 1</h3>
+              <p>Official mock examination</p>
+              <p>Timing: 90 seconds per question</p>
+            </div>
+            <div class="actions"><button class="primary hosted-exam-btn" data-exam="mock1">Select</button></div>
+          </div>
+          <div class="exam-card">
+            <div>
+              <h3>FRCR 2A Mock 2</h3>
+              <p>Official mock examination</p>
+              <p>Timing: 90 seconds per question</p>
+            </div>
+            <div class="actions"><button class="primary hosted-exam-btn" data-exam="mock2">Select</button></div>
+          </div>
+        </div>
+
+        <div class="upload-box">
+          <h3>Practice using your own question set</h3>
+          <p>Upload a compatible CSV file. The examination time is calculated automatically at 90 seconds per question.</p>
+          <input type="file" id="custom-csv" accept=".csv" />
+          <button id="select-custom" class="secondary">Use uploaded CSV</button>
+          <div id="selection-error" class="error"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Instructions -->
+  <section id="instructions-screen" class="screen hidden">
+    <div class="panel">
+      <div class="panel-head"><h2 id="instructions-title">Examination instructions</h2></div>
+      <div class="panel-body instructions">
+        <ol>
+          <li>For each question select the one item that you think represents the best answer.</li>
+          <li>You should answer all questions. The examination is not negatively marked.</li>
+          <li>You may leave whenever you finish, even if it is before the advertised end time. Click <strong>Finish</strong> after reviewing your answers and log out. Raise your hand to make the invigilator aware, and leave silently to avoid disturbing others.</li>
+        </ol>
+        <p>You may flag questions for review and return to any question before submission.</p>
+        <p>The examination will automatically submit when the displayed time reaches zero.</p>
+        <p id="timing-note"></p>
+        <p class="instruction-footer">Press the arrow below to start the examination.</p>
+        <div class="instruction-actions">
+          <button id="back-to-selection" class="secondary">Back</button>
+          <button id="start-exam" class="primary arrow-start" aria-label="Start examination">➜</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Exam -->
+  <section id="exam-shell">
+    <aside id="sidebar">
+      <h3>Questions</h3>
+      <div class="filter-wrap" id="filter-wrap">
+        <div class="seg" role="tablist" aria-label="Question filter">
+          <button id="f-all" role="tab" aria-pressed="true">All</button>
+          <button id="f-flagged" role="tab" aria-pressed="false">Flagged</button>
+          <button id="f-unanswered" role="tab" aria-pressed="false">Unanswered</button>
+        </div>
+        <span class="filter-count" id="filter-count"></span>
+      </div>
+      <div id="nav-buttons"></div>
+    </aside>
+
+    <main id="main">
+      <div id="header">
+        <div><span id="exam-name-header"></span> &nbsp;•&nbsp; Time Remaining: <span id="timer">00:00:00</span></div>
+        <div id="toolbar">
+          <button id="flag-btn" class="icon-btn" title="Flag">🚩</button>
+          <button id="highlight-btn" class="icon-btn" title="Highlight">✏️</button>
+          <button id="unhighlight-btn" class="icon-btn" title="Clear highlights">❌</button>
+          <button id="finish-btn" class="icon-btn finish-btn" title="Finish">Finish</button>
+        </div>
+      </div>
+
+      <section id="question-container">
+        <p id="question"></p>
+        <div id="answer-buttons"></div>
+      </section>
+
+      <div class="controls">
+        <div>
+          <button id="prev-btn" class="btn">Previous</button>
+          <button id="next-btn" class="btn">Next</button>
+        </div>
+      </div>
+    </main>
+  </section>
+
+  <!-- Review Page -->
+  <section id="review-page">
+    <div id="review-header">
+      <div id="scoreline"></div>
+      <div id="submission-status"></div>
+    </div>
+    <div id="review-wrap">
+      <div class="controls-review">
+        <button id="download-results-csv" class="btn">Download Results CSV</button>
+        <button id="download-paper-csv" class="btn">Download Exam Paper CSV</button>
+      </div>
+      <table id="review-table">
+        <thead>
+          <tr>
+            <th style="width:60px;">#</th>
+            <th>Question</th>
+            <th>Your Answer</th>
+            <th>Correct Answer</th>
+            <th>Result</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Finish Modal -->
+  <div id="finish-backdrop" class="modal-backdrop">
+    <div class="modal">
+      <header>Finish Attempt?</header>
+      <div class="body">
+        <p>Finishing will submit your answers and take you to the review page. You will not be able to return to the questions, and navigation will be disabled.</p>
+        <p id="confirm-step-1" style="margin:0;"><strong>Step 1:</strong> Click <em>Yes — I want to finish</em> to proceed.</p>
+        <p id="confirm-step-2" class="hidden" style="margin:0;"><strong>Step 2:</strong> Click <em>I'm sure — Finish</em> to submit.</p>
+      </div>
+      <div class="actions">
+        <button id="finish-cancel" class="btn">Cancel</button>
+        <button id="finish-yes" class="btn">Yes — I want to finish</button>
+        <button id="finish-final" class="btn" disabled>I'm sure — Finish</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ---------------- CONFIGURATION ----------------
+    const CONFIG = {
+      password: 'FRCR2A',
+      secondsPerQuestion: 90,
+      googleScriptUrl: 'https://script.google.com/macros/s/AKfycbxzilAx4f_KCVYjI2PK3REjtRLFZTfEaVUZ0DeltAWcQh9RON9SRNsoaNYFCT9Qey1G/exec', // Paste deployed Google Apps Script Web App URL here when ready.
+      hostedExams: {
+        mock1: { name:'FRCR 2A Mock 1', file:'mock1.csv', recordResults:true },
+        mock2: { name:'FRCR 2A Mock 2', file:'mock2.csv', recordResults:true }
+      }
+    };
+
+    // ---------------- STATE ----------------
+    let questions = [];
+    let userAnswers = {}; // qIndex -> answer text
+    let flaggedQuestions = new Set();
+    let strikeState = {};
+    let currentQuestionIndex = 0;
+    let highlightMode = false;
+    let timerInterval = null;
+    let finished = false;
+    let candidateName = '';
+    let currentFilter = 'all';
+    let selectedExamKey = '';
+    let selectedExamName = '';
+    let selectedExamRecordsResults = false;
+    let pendingCsvText = '';
+    let examStartedAt = null;
+    let examSubmittedAt = null;
+
+    const els = {
+      welcomeScreen: document.getElementById('welcome-screen'),
+      selectionScreen: document.getElementById('selection-screen'),
+      instructionsScreen: document.getElementById('instructions-screen'),
+      candidateName: document.getElementById('candidate-name'),
+      candidatePassword: document.getElementById('candidate-password'),
+      continueLogin: document.getElementById('continue-login'),
+      loginError: document.getElementById('login-error'),
+      customCsv: document.getElementById('custom-csv'),
+      selectCustom: document.getElementById('select-custom'),
+      selectionError: document.getElementById('selection-error'),
+      instructionsTitle: document.getElementById('instructions-title'),
+      timingNote: document.getElementById('timing-note'),
+      backToSelection: document.getElementById('back-to-selection'),
+      startExam: document.getElementById('start-exam'),
+      examShell: document.getElementById('exam-shell'),
+      sidebar: document.getElementById('sidebar'),
+      navButtons: document.getElementById('nav-buttons'),
+      question: document.getElementById('question'),
+      answers: document.getElementById('answer-buttons'),
+      prev: document.getElementById('prev-btn'),
+      next: document.getElementById('next-btn'),
+      flag: document.getElementById('flag-btn'),
+      finish: document.getElementById('finish-btn'),
+      timer: document.getElementById('timer'),
+      examNameHeader: document.getElementById('exam-name-header'),
+      reviewPage: document.getElementById('review-page'),
+      main: document.getElementById('main'),
+      reviewTableBody: document.querySelector('#review-table tbody'),
+      scoreline: document.getElementById('scoreline'),
+      submissionStatus: document.getElementById('submission-status'),
+      downloadResultsCsv: document.getElementById('download-results-csv'),
+      downloadPaperCsv: document.getElementById('download-paper-csv'),
+      finishBackdrop: document.getElementById('finish-backdrop'),
+      finishCancel: document.getElementById('finish-cancel'),
+      finishYes: document.getElementById('finish-yes'),
+      finishFinal: document.getElementById('finish-final'),
+      confirmStep1: document.getElementById('confirm-step-1'),
+      confirmStep2: document.getElementById('confirm-step-2'),
+      highlightBtn: document.getElementById('highlight-btn'),
+      unhighlightBtn: document.getElementById('unhighlight-btn'),
+      fAll: document.getElementById('f-all'),
+      fFlagged: document.getElementById('f-flagged'),
+      fUnanswered: document.getElementById('f-unanswered'),
+      filterCount: document.getElementById('filter-count')
+    };
+
+    // ---------------- PRE-EXAM FLOW ----------------
+    els.continueLogin.addEventListener('click', () => {
+      const name = els.candidateName.value.trim();
+      const pwd = els.candidatePassword.value.trim();
+      if (!name || pwd !== CONFIG.password) {
+        els.loginError.textContent = 'Enter your name and the correct password.';
+        return;
+      }
+      candidateName = name;
+      els.loginError.textContent = '';
+      showOnly(els.selectionScreen);
+    });
+
+    document.querySelectorAll('.hosted-exam-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const key = btn.dataset.exam;
+        const cfg = CONFIG.hostedExams[key];
+        els.selectionError.textContent = '';
+        btn.disabled = true;
+        const original = btn.textContent;
+        btn.textContent = 'Loading…';
+        try {
+          const response = await fetch(cfg.file, { cache:'no-store' });
+          if (!response.ok) throw new Error(`Could not load ${cfg.file}`);
+          pendingCsvText = await response.text();
+          selectedExamKey = key;
+          selectedExamName = cfg.name;
+          selectedExamRecordsResults = cfg.recordResults;
+          prepareInstructionsFromCsv(pendingCsvText);
+        } catch (err) {
+          els.selectionError.textContent = `${cfg.name} is not yet available on this build. Add ${cfg.file} beside this HTML file when deploying.`;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = original;
+        }
+      });
+    });
+
+    els.selectCustom.addEventListener('click', () => {
+      const file = els.customCsv.files[0];
+      if (!file) {
+        els.selectionError.textContent = 'Choose a CSV file first.';
+        return;
+      }
+      els.selectionError.textContent = '';
+      const reader = new FileReader();
+      reader.onload = e => {
+        pendingCsvText = e.target.result;
+        selectedExamKey = 'custom';
+        selectedExamName = file.name.replace(/\.csv$/i,'') || 'Custom practice set';
+        selectedExamRecordsResults = false;
+        prepareInstructionsFromCsv(pendingCsvText);
+      };
+      reader.readAsText(file);
+    });
+
+    els.backToSelection.addEventListener('click', () => showOnly(els.selectionScreen));
+
+    function prepareInstructionsFromCsv(text) {
+      const parsed = parseCsvToQuestions(text);
+      if (!parsed.length) {
+        els.selectionError.textContent = 'No valid questions were found in that CSV.';
+        return;
+      }
+      questions = parsed;
+      const totalSeconds = questions.length * CONFIG.secondsPerQuestion;
+      els.instructionsTitle.textContent = selectedExamName + ' — Instructions';
+      els.timingNote.textContent = `This examination contains ${questions.length} question${questions.length===1?'':'s'} and allows ${formatDuration(totalSeconds)} (${CONFIG.secondsPerQuestion} seconds per question).`;
+      showOnly(els.instructionsScreen);
+    }
+
+    els.startExam.addEventListener('click', () => {
+      resetExamStateForStart();
+      els.instructionsScreen.classList.add('hidden');
+      els.examShell.style.display = 'flex';
+      els.reviewPage.style.display = 'none';
+      els.examNameHeader.textContent = selectedExamName;
+      renderSidebar();
+      showQuestion();
+      examStartedAt = new Date();
+      startTimer(questions.length * CONFIG.secondsPerQuestion);
+    });
+
+    function showOnly(screen) {
+      [els.welcomeScreen, els.selectionScreen, els.instructionsScreen].forEach(s => s.classList.add('hidden'));
+      els.examShell.style.display = 'none';
+      els.reviewPage.style.display = 'none';
+      screen.classList.remove('hidden');
+    }
+
+    function resetExamStateForStart() {
+      userAnswers = {};
+      flaggedQuestions = new Set();
+      strikeState = {};
+      questions.forEach((_,i) => strikeState[i] = new Set());
+      currentQuestionIndex = 0;
+      currentFilter = 'all';
+      finished = false;
+      highlightMode = false;
+      els.fAll.setAttribute('aria-pressed','true');
+      els.fFlagged.setAttribute('aria-pressed','false');
+      els.fUnanswered.setAttribute('aria-pressed','false');
+      els.prev.disabled = false;
+      els.next.disabled = false;
+      els.flag.disabled = false;
+      els.finish.disabled = false;
+      els.sidebar.style.display = 'block';
+    }
+
+    // ---------------- EXAM EVENTS ----------------
+    els.flag.addEventListener('click', toggleFlag);
+    els.prev.addEventListener('click', () => goTo(currentQuestionIndex - 1));
+    els.next.addEventListener('click', () => goTo(currentQuestionIndex + 1));
+    els.finish.addEventListener('click', () => { if (!finished) openFinishModal(); });
+    els.finishCancel.addEventListener('click', closeFinishModal);
+    els.finishYes.addEventListener('click', () => {
+      els.finishYes.disabled = true;
+      els.finishFinal.disabled = false;
+      els.confirmStep1.classList.add('hidden');
+      els.confirmStep2.classList.remove('hidden');
+    });
+    els.finishFinal.addEventListener('click', () => finishExam(false));
+    els.highlightBtn.addEventListener('click', () => highlightMode = !highlightMode);
+    els.unhighlightBtn.addEventListener('click', clearHighlights);
+    els.fAll.addEventListener('click', () => setFilter('all'));
+    els.fFlagged.addEventListener('click', () => setFilter('flagged'));
+    els.fUnanswered.addEventListener('click', () => setFilter('unanswered'));
+
+    document.addEventListener('mouseup', () => {
+      if (!highlightMode) return;
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed) return;
+      const range = selection.getRangeAt(0);
+      if (!document.getElementById('question-container').contains(range.commonAncestorContainer)) return;
+      try {
+        const span = document.createElement('span');
+        span.className = 'highlighted';
+        span.style.backgroundColor = 'yellow';
+        range.surroundContents(span);
+        selection.removeAllRanges();
+      } catch (_) {}
+    });
+
+    // ---------------- CSV ----------------
+    function parseCsvToQuestions(text) {
+      const normalized = String(text || '').replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+      const rows = parseCsv(normalized).filter(r => r.some(c => String(c).trim().length));
+      if (rows.length < 2) return [];
+      const body = rows.slice(1);
+      return body.map((row,index) => {
+        const qText = (row[0] || '').trim();
+        const opts = ['A','B','C','D','E'].map((letter,i) => ({ letter, text:(row[i+1] || '').trim() }));
+        const correctRaw = (row[6] || '').trim();
+        let correctText = correctRaw;
+        if (['A','B','C','D','E'].includes(correctRaw.toUpperCase())) {
+          const idx = {A:0,B:1,C:2,D:3,E:4}[correctRaw.toUpperCase()];
+          correctText = opts[idx]?.text || '';
+        }
+        opts.forEach(o => o.correct = o.text === correctText);
+        const category = (row[7] || '').trim();
+        return { index, question:qText, answers:opts, correctAnswer:correctText, category };
+      }).filter(q => q.question && q.answers.some(a => a.text));
+    }
+
+    function parseCsv(text) {
+      const rows = [];
+      let row = [], cell = '', inQuotes = false;
+      for (let i=0; i<text.length; i++) {
+        const ch = text[i];
+        if (ch === '"') {
+          if (inQuotes && text[i+1] === '"') { cell += '"'; i++; }
+          else inQuotes = !inQuotes;
+        } else if (ch === ',' && !inQuotes) {
+          row.push(cell); cell = '';
+        } else if (ch === '\n' && !inQuotes) {
+          row.push(cell); rows.push(row); row = []; cell = '';
+        } else cell += ch;
+      }
+      row.push(cell); rows.push(row);
+      return rows;
+    }
+
+    // ---------------- RENDERING ----------------
+    function renderSidebar() {
+      els.navButtons.innerHTML = '';
+      const indices = questions.map((_,i)=>i).filter(matchesFilter);
+      indices.forEach(i => {
+        const btn = document.createElement('button');
+        btn.innerText = i + 1;
+        btn.className = 'sidebar-btn';
+        btn.id = 'nav-btn-' + i;
+        const answered = !!userAnswers[i];
+        btn.classList.toggle('answered', answered);
+        btn.classList.toggle('unanswered', !answered);
+        btn.classList.toggle('flagged', flaggedQuestions.has(i));
+        btn.addEventListener('click', () => { if (!finished) goTo(i); });
+        els.navButtons.appendChild(btn);
+      });
+      updateFilterCount();
+      if (!matchesFilter(currentQuestionIndex) && indices.length) goTo(indices[0]);
+    }
+
+    function setFilter(next) {
+      currentFilter = next;
+      els.fAll.setAttribute('aria-pressed', String(next==='all'));
+      els.fFlagged.setAttribute('aria-pressed', String(next==='flagged'));
+      els.fUnanswered.setAttribute('aria-pressed', String(next==='unanswered'));
+      renderSidebar();
+    }
+
+    function matchesFilter(i) {
+      if (currentFilter === 'flagged') return flaggedQuestions.has(i);
+      if (currentFilter === 'unanswered') return !userAnswers[i];
+      return true;
+    }
+
+    function updateFilterCount() {
+      const total = questions.length;
+      const flagged = flaggedQuestions.size;
+      const unanswered = questions.reduce((acc,_,i) => acc + (userAnswers[i] ? 0 : 1), 0);
+      els.filterCount.textContent = currentFilter==='all' ? `${total} total` : currentFilter==='flagged' ? `${flagged} flagged` : `${unanswered} unanswered`;
+    }
+
+    function goTo(i) {
+      if (i < 0 || i >= questions.length) return;
+      currentQuestionIndex = i;
+      showQuestion();
+    }
+
+    function showQuestion() {
+      const q = questions[currentQuestionIndex];
+      if (!q) return;
+      els.question.textContent = q.question;
+      els.answers.innerHTML = '';
+      q.answers.forEach((a,idx) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'option-container';
+
+        const strikeChip = document.createElement('span');
+        strikeChip.textContent = '̶a̶b̶c̶';
+        strikeChip.className = 'strike-chip';
+        strikeChip.title = 'Strike through option';
+
+        const input = document.createElement('input');
+        input.type = 'radio';
+        input.name = `answer-${currentQuestionIndex}`;
+        input.value = a.text;
+        input.id = `opt-${currentQuestionIndex}-${idx}`;
+        input.checked = userAnswers[currentQuestionIndex] === a.text;
+        input.addEventListener('change', () => {
+          userAnswers[currentQuestionIndex] = a.text;
+          updateSidebarState();
+          showQuestion();
+        });
+
+        const label = document.createElement('label');
+        label.className = 'option-label';
+        label.setAttribute('for', input.id);
+        label.textContent = `${a.letter}. ${a.text}`;
+        if (strikeState[currentQuestionIndex]?.has(a.letter)) label.classList.add('strike');
+        label.addEventListener('click', e => {
+          if (highlightMode) {
+            e.preventDefault();
+            toggleStrike(currentQuestionIndex, a.letter, label);
+          }
+        });
+        strikeChip.addEventListener('click', e => {
+          e.stopPropagation();
+          toggleStrike(currentQuestionIndex, a.letter, label);
+        });
+
+        wrapper.appendChild(strikeChip);
+        wrapper.appendChild(input);
+        wrapper.appendChild(label);
+        els.answers.appendChild(wrapper);
+      });
+
+      els.flag.classList.toggle('flagged', flaggedQuestions.has(currentQuestionIndex));
+      els.prev.disabled = finished || currentQuestionIndex === 0;
+      els.next.disabled = finished || currentQuestionIndex === questions.length - 1;
+    }
+
+    function toggleStrike(qIndex, letter, labelEl) {
+      const set = strikeState[qIndex];
+      if (set.has(letter)) { set.delete(letter); labelEl.classList.remove('strike'); }
+      else { set.add(letter); labelEl.classList.add('strike'); }
+    }
+
+    function toggleFlag() {
+      if (finished) return;
+      if (flaggedQuestions.has(currentQuestionIndex)) flaggedQuestions.delete(currentQuestionIndex);
+      else flaggedQuestions.add(currentQuestionIndex);
+      updateSidebarState();
+      showQuestion();
+    }
+
+    function updateSidebarState() {
+      questions.forEach((_,i) => {
+        const btn = document.getElementById('nav-btn-' + i);
+        if (!btn) return;
+        const answered = !!userAnswers[i];
+        btn.classList.toggle('answered', answered);
+        btn.classList.toggle('unanswered', !answered);
+        btn.classList.toggle('flagged', flaggedQuestions.has(i));
+        btn.disabled = finished;
+      });
+      updateFilterCount();
+      if (!matchesFilter(currentQuestionIndex)) renderSidebar();
+    }
+
+    // ---------------- TIMER ----------------
+    function startTimer(totalSeconds) {
+      clearInterval(timerInterval);
+      let seconds = totalSeconds;
+      const tick = () => {
+        const hrs = String(Math.floor(seconds / 3600)).padStart(2,'0');
+        const mins = String(Math.floor((seconds % 3600) / 60)).padStart(2,'0');
+        const secs = String(seconds % 60).padStart(2,'0');
+        els.timer.textContent = `${hrs}:${mins}:${secs}`;
+        if (finished) { clearInterval(timerInterval); return; }
+        if (seconds-- <= 0) {
+          clearInterval(timerInterval);
+          finishExam(true);
+        }
+      };
+      tick();
+      timerInterval = setInterval(tick,1000);
+    }
+
+    function formatDuration(totalSeconds) {
+      const mins = Math.round(totalSeconds / 60);
+      if (mins < 60) return `${mins} minutes`;
+      const h = Math.floor(mins / 60), m = mins % 60;
+      return `${h} hour${h===1?'':'s'}${m ? ` ${m} minutes` : ''}`;
+    }
+
+    // ---------------- FINISH / REVIEW ----------------
+    function openFinishModal() {
+      els.finishBackdrop.style.display = 'flex';
+      els.finishYes.disabled = false;
+      els.finishFinal.disabled = true;
+      els.confirmStep1.classList.remove('hidden');
+      els.confirmStep2.classList.add('hidden');
+    }
+    function closeFinishModal() { els.finishBackdrop.style.display = 'none'; }
+
+    async function finishExam(autoByTimer) {
+      if (finished) return;
+      finished = true;
+      examSubmittedAt = new Date();
+      clearInterval(timerInterval);
+      closeFinishModal();
+      els.prev.disabled = true;
+      els.next.disabled = true;
+      els.flag.disabled = true;
+      els.finish.disabled = true;
+      els.sidebar.style.display = 'none';
+
+      const results = questions.map((q,idx) => {
+        const yourText = userAnswers[idx] || '';
+        const correctText = q.correctAnswer || (q.answers.find(a=>a.correct)?.text || '');
+        const correct = yourText === correctText;
+        const yourLetter = q.answers.find(a => a.text === yourText)?.letter || '';
+        const correctLetter = q.answers.find(a => a.text === correctText)?.letter || '';
+        return { idx:idx+1, question:q.question, category:q.category || '', yourText, correctText, yourLetter, correctLetter, correct };
+      });
+
+      const total = results.length;
+      const correctCount = results.filter(r => r.correct).length;
+      const percent = total ? Math.round((correctCount/total)*1000)/10 : 0;
+      const unanswered = results.filter(r => !r.yourText).length;
+
+      els.reviewTableBody.innerHTML = '';
+      results.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.idx}</td><td>${escapeHtml(r.question)}</td><td>${escapeHtml(r.yourText || '—')}</td><td>${escapeHtml(r.correctText)}</td><td class="${r.correct?'correct':'incorrect'}">${r.correct?'Correct':'Incorrect'}</td>`;
+        els.reviewTableBody.appendChild(tr);
+      });
+
+      els.scoreline.textContent = `${candidateName} — ${selectedExamName} — Score: ${percent}% • ${correctCount} / ${total} correct`;
+      els.submissionStatus.textContent = autoByTimer ? 'Time expired: the examination was submitted automatically.' : 'Examination submitted.';
+
+      els.downloadResultsCsv.onclick = () => downloadResultsCsv(results, correctCount, total, percent);
+      els.downloadPaperCsv.onclick = () => downloadPaperCsv(results);
+
+      els.examShell.style.display = 'none';
+      els.reviewPage.style.display = 'block';
+
+      if (selectedExamRecordsResults) await submitResultsToGoogleSheet(results, correctCount, total, percent, unanswered, autoByTimer);
+    }
+
+    function downloadResultsCsv(results, correctCount, total, percent) {
+      const meta = [
+        ['Candidate', candidateName],
+        ['Examination', selectedExamName],
+        ['Score', `${correctCount}/${total}`],
+        ['Percentage', percent],
+        ['Started', examStartedAt ? examStartedAt.toISOString() : ''],
+        ['Submitted', examSubmittedAt ? examSubmittedAt.toISOString() : ''],
+        []
+      ];
+      const header = ['Question #','Category','Question','Your Answer','Correct Answer','Result'];
+      const rows = results.map(r => [r.idx,r.category,r.question,r.yourText,r.correctText,r.correct?'Correct':'Incorrect']);
+      downloadCsvFile([...meta, header, ...rows], safeFilename(`${selectedExamName}_${candidateName}_results.csv`));
+    }
+
+    function downloadPaperCsv(results) {
+      const header = ['Question #','Category','Question','A','B','C','D','E','Your Answer','Correct Answer','Result'];
+      const rows = questions.map((q,i) => {
+        const r = results[i];
+        const byLetter = Object.fromEntries(q.answers.map(a => [a.letter,a.text]));
+        return [i+1,q.category||'',q.question,byLetter.A||'',byLetter.B||'',byLetter.C||'',byLetter.D||'',byLetter.E||'',r.yourText,r.correctText,r.correct?'Correct':'Incorrect'];
+      });
+      downloadCsvFile([header,...rows], safeFilename(`${selectedExamName}_${candidateName}_paper.csv`));
+    }
+
+    function downloadCsvFile(rows, filename) {
+      const csv = rows.map(row => row.map(csvEscape).join(',')).join('\n');
+      const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    async function submitResultsToGoogleSheet(results, correctCount, total, percent, unanswered, autoByTimer) {
+      if (!CONFIG.googleScriptUrl) {
+        els.submissionStatus.textContent += ' Central results recording is not connected yet.';
+        return;
+      }
+      const payload = {
+        candidateName,
+        examKey:selectedExamKey,
+        examName:selectedExamName,
+        startedAt:examStartedAt ? examStartedAt.toISOString() : '',
+        submittedAt:examSubmittedAt ? examSubmittedAt.toISOString() : '',
+        autoSubmitted:!!autoByTimer,
+        totalQuestions:total,
+        correctCount,
+        percent,
+        unanswered,
+        answers:results.map(r => ({
+          number:r.idx,
+          category:r.category,
+          answerLetter:r.yourLetter,
+          answerText:r.yourText,
+          correctLetter:r.correctLetter,
+          correctText:r.correctText,
+          isCorrect:r.correct
+        }))
+      };
+      try {
+        await fetch(CONFIG.googleScriptUrl, {
+          method:'POST',
+          mode:'no-cors',
+          headers:{'Content-Type':'text/plain;charset=utf-8'},
+          body:JSON.stringify(payload)
+        });
+        els.submissionStatus.textContent += ' Results submission sent centrally.';
+      } catch (err) {
+        els.submissionStatus.textContent += ' Results could not be recorded centrally; please retain the downloaded CSV.';
+      }
+    }
+
+    // ---------------- UTILITIES ----------------
+    function escapeHtml(str) {
+      return (str||'').replace(/[&<>\"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[s]));
+    }
+    function csvEscape(cell) {
+      if (cell == null) cell = '';
+      const s = String(cell).replace(/\r?\n/g,' ');
+      return /[",]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+    }
+    function safeFilename(name) { return name.replace(/[\\/:*?"<>|]+/g,'_').replace(/\s+/g,'_'); }
+    function clearHighlights() {
+      document.querySelectorAll('.highlighted').forEach(el => {
+        const parent = el.parentNode;
+        while (el.firstChild) parent.insertBefore(el.firstChild,el);
+        parent.removeChild(el);
+      });
+    }
+  </script>
+</body>
+</html>
