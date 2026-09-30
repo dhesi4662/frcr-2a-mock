@@ -14,5 +14,29 @@
     "description": "Official mock examination",
     "secondsPerQuestion": 90,
     "recordResults": true
+  },
+  {
+    "key": "mock3",
+    "name": "FRCR 2A Mock 3",
+    "file": "mock3.csv",
+    "description": "Official mock examination",
+    "secondsPerQuestion": 90,
+    "recordResults": true
+  },
+  {
+    "key": "mock4",
+    "name": "FRCR 2A Mock 4",
+    "file": "mock4.csv",
+    "description": "Official mock examination",
+    "secondsPerQuestion": 90,
+    "recordResults": true
+  },
+  {
+    "key": "mock5",
+    "name": "FRCR 2A Mock 5",
+    "file": "mock5.csv",
+    "description": "Official mock examination",
+    "secondsPerQuestion": 90,
+    "recordResults": true
   }
 ]
