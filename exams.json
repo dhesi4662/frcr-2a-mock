@@ -1,0 +1,18 @@
+[
+  {
+    "key": "mock1",
+    "name": "FRCR 2A Mock 1",
+    "file": "mock1.csv",
+    "description": "Official mock examination",
+    "secondsPerQuestion": 90,
+    "recordResults": true
+  },
+  {
+    "key": "mock2",
+    "name": "FRCR 2A Mock 2",
+    "file": "mock2.csv",
+    "description": "Official mock examination",
+    "secondsPerQuestion": 90,
+    "recordResults": true
+  }
+]
