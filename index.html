@@ -31,6 +31,10 @@
     .primary:hover { background:var(--brand-dark); }
     .secondary { background:#eee; color:#111; border:1px solid var(--border); border-radius:7px; padding:11px 16px; cursor:pointer; }
     .error { color:var(--bad); min-height:20px; margin-top:8px; }
+    .recovery-box { margin-top:18px; padding:14px; border:1px solid #b9cbd6; border-radius:8px; background:#eef5f8; }
+    .recovery-box strong { display:block; margin-bottom:6px; }
+    .recovery-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+    .autosave-status { font-size:12px; opacity:.9; white-space:nowrap; }
 
     .exam-grid { display:grid; gap:14px; }
     .exam-card { border:1px solid var(--border); background:#fff; border-radius:10px; padding:16px; display:flex; justify-content:space-between; align-items:center; gap:16px; }
@@ -122,6 +126,15 @@
         </div>
         <button id="continue-login" class="primary">Continue</button>
         <div id="login-error" class="error"></div>
+        <div id="recovery-box" class="recovery-box hidden">
+          <strong>Saved examination attempt found</strong>
+          <div id="recovery-summary"></div>
+          <div class="recovery-actions">
+            <button id="resume-attempt" class="primary">Resume saved attempt</button>
+            <button id="discard-attempt" class="secondary">Discard saved attempt</button>
+          </div>
+          <div style="font-size:12px; margin-top:8px; color:#555;">Your password is still required to resume. The timer continues to run while the browser or computer is closed.</div>
+        </div>
       </div>
     </div>
   </section>
@@ -131,23 +144,8 @@
     <div class="panel">
       <div class="panel-head"><h2>Select examination</h2></div>
       <div class="panel-body">
-        <div class="exam-grid">
-          <div class="exam-card">
-            <div>
-              <h3>FRCR 2A Mock 1</h3>
-              <p>Official mock examination</p>
-              <p>Timing: 90 seconds per question</p>
-            </div>
-            <div class="actions"><button class="primary hosted-exam-btn" data-exam="mock1">Select</button></div>
-          </div>
-          <div class="exam-card">
-            <div>
-              <h3>FRCR 2A Mock 2</h3>
-              <p>Official mock examination</p>
-              <p>Timing: 90 seconds per question</p>
-            </div>
-            <div class="actions"><button class="primary hosted-exam-btn" data-exam="mock2">Select</button></div>
-          </div>
+        <div class="exam-grid" id="hosted-exam-grid">
+          <div class="exam-card"><div><h3>Loading examinations…</h3></div></div>
         </div>
 
         <div class="upload-box">
@@ -200,7 +198,7 @@
 
     <main id="main">
       <div id="header">
-        <div><span id="exam-name-header"></span> &nbsp;•&nbsp; Time Remaining: <span id="timer">00:00:00</span></div>
+        <div><span id="exam-name-header"></span> &nbsp;•&nbsp; Time Remaining: <span id="timer">00:00:00</span> &nbsp;•&nbsp; <span id="autosave-status" class="autosave-status">Local autosave on</span></div>
         <div id="toolbar">
           <button id="flag-btn" class="icon-btn" title="Flag">🚩</button>
           <button id="highlight-btn" class="icon-btn" title="Highlight">✏️</button>
@@ -271,11 +269,9 @@
     const CONFIG = {
       password: 'FRCR2A',
       secondsPerQuestion: 90,
-      googleScriptUrl: 'https://script.google.com/macros/s/AKfycbxzilAx4f_KCVYjI2PK3REjtRLFZTfEaVUZ0DeltAWcQh9RON9SRNsoaNYFCT9Qey1G/exec', // Paste deployed Google Apps Script Web App URL here when ready.
-      hostedExams: {
-        mock1: { name:'FRCR 2A Mock 1', file:'mock1.csv', recordResults:true },
-        mock2: { name:'FRCR 2A Mock 2', file:'mock2.csv', recordResults:true }
-      }
+      examsManifest: 'exams.json',
+      recoveryKey: 'frcr2a_in_progress_v1',
+      googleScriptUrl: 'https://script.google.com/macros/s/AKfycbxzilAx4f_KCVYjI2PK3REjtRLFZTfEaVUZ0DeltAWcQh9RON9SRNsoaNYFCT9Qey1G/exec'
     };
 
     // ---------------- STATE ----------------
@@ -295,6 +291,10 @@
     let pendingCsvText = '';
     let examStartedAt = null;
     let examSubmittedAt = null;
+    let examEndsAt = null;
+    let selectedExamSecondsPerQuestion = CONFIG.secondsPerQuestion;
+    let hostedExams = {};
+    let recoveryAutosaveInterval = null;
 
     const els = {
       welcomeScreen: document.getElementById('welcome-screen'),
@@ -304,6 +304,11 @@
       candidatePassword: document.getElementById('candidate-password'),
       continueLogin: document.getElementById('continue-login'),
       loginError: document.getElementById('login-error'),
+      recoveryBox: document.getElementById('recovery-box'),
+      recoverySummary: document.getElementById('recovery-summary'),
+      resumeAttempt: document.getElementById('resume-attempt'),
+      discardAttempt: document.getElementById('discard-attempt'),
+      hostedExamGrid: document.getElementById('hosted-exam-grid'),
       customCsv: document.getElementById('custom-csv'),
       selectCustom: document.getElementById('select-custom'),
       selectionError: document.getElementById('selection-error'),
@@ -321,6 +326,7 @@
       flag: document.getElementById('flag-btn'),
       finish: document.getElementById('finish-btn'),
       timer: document.getElementById('timer'),
+      autosaveStatus: document.getElementById('autosave-status'),
       examNameHeader: document.getElementById('exam-name-header'),
       reviewPage: document.getElementById('review-page'),
       main: document.getElementById('main'),
@@ -344,6 +350,96 @@
     };
 
     // ---------------- PRE-EXAM FLOW ----------------
+    initialisePlatform();
+
+    async function initialisePlatform() {
+      await loadExamManifest();
+      showRecoveryPromptIfAvailable();
+    }
+
+    async function loadExamManifest() {
+      els.hostedExamGrid.innerHTML = '<div class="exam-card"><div><h3>Loading examinations…</h3></div></div>';
+      try {
+        const response = await fetch(CONFIG.examsManifest, { cache:'no-store' });
+        if (!response.ok) throw new Error(`Could not load ${CONFIG.examsManifest}`);
+        const manifest = await response.json();
+        if (!Array.isArray(manifest)) throw new Error('Exam manifest must be a JSON array.');
+
+        hostedExams = {};
+        manifest.filter(x => x && x.enabled !== false).forEach(item => {
+          if (!item.key || !item.name || !item.file) return;
+          hostedExams[item.key] = {
+            name: item.name,
+            file: item.file,
+            description: item.description || 'Official mock examination',
+            recordResults: item.recordResults !== false,
+            secondsPerQuestion: Number(item.secondsPerQuestion || CONFIG.secondsPerQuestion)
+          };
+        });
+        renderHostedExamCards();
+      } catch (err) {
+        hostedExams = {};
+        els.hostedExamGrid.innerHTML = '<div class="exam-card"><div><h3>Hosted examinations unavailable</h3><p>Check that exams.json is in the same folder as index.html.</p></div></div>';
+      }
+    }
+
+    function renderHostedExamCards() {
+      els.hostedExamGrid.innerHTML = '';
+      const entries = Object.entries(hostedExams);
+      if (!entries.length) {
+        els.hostedExamGrid.innerHTML = '<div class="exam-card"><div><h3>No hosted examinations configured</h3><p>Add an entry to exams.json.</p></div></div>';
+        return;
+      }
+
+      entries.forEach(([key,cfg]) => {
+        const card = document.createElement('div');
+        card.className = 'exam-card';
+        const info = document.createElement('div');
+        const title = document.createElement('h3');
+        title.textContent = cfg.name;
+        const desc = document.createElement('p');
+        desc.textContent = cfg.description;
+        const timing = document.createElement('p');
+        timing.textContent = `Timing: ${cfg.secondsPerQuestion} seconds per question`;
+        info.append(title, desc, timing);
+
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+        const btn = document.createElement('button');
+        btn.className = 'primary hosted-exam-btn';
+        btn.textContent = 'Select';
+        btn.addEventListener('click', () => selectHostedExam(key, btn));
+        actions.appendChild(btn);
+
+        card.append(info, actions);
+        els.hostedExamGrid.appendChild(card);
+      });
+    }
+
+    async function selectHostedExam(key, btn) {
+      const cfg = hostedExams[key];
+      if (!cfg) return;
+      els.selectionError.textContent = '';
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = 'Loading…';
+      try {
+        const response = await fetch(cfg.file, { cache:'no-store' });
+        if (!response.ok) throw new Error(`Could not load ${cfg.file}`);
+        pendingCsvText = await response.text();
+        selectedExamKey = key;
+        selectedExamName = cfg.name;
+        selectedExamRecordsResults = cfg.recordResults;
+        selectedExamSecondsPerQuestion = cfg.secondsPerQuestion || CONFIG.secondsPerQuestion;
+        prepareInstructionsFromCsv(pendingCsvText);
+      } catch (err) {
+        els.selectionError.textContent = `${cfg.name} could not be loaded. Check that ${cfg.file} is beside index.html.`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = original;
+      }
+    }
+
     els.continueLogin.addEventListener('click', () => {
       const name = els.candidateName.value.trim();
       const pwd = els.candidatePassword.value.trim();
@@ -354,31 +450,6 @@
       candidateName = name;
       els.loginError.textContent = '';
       showOnly(els.selectionScreen);
-    });
-
-    document.querySelectorAll('.hosted-exam-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const key = btn.dataset.exam;
-        const cfg = CONFIG.hostedExams[key];
-        els.selectionError.textContent = '';
-        btn.disabled = true;
-        const original = btn.textContent;
-        btn.textContent = 'Loading…';
-        try {
-          const response = await fetch(cfg.file, { cache:'no-store' });
-          if (!response.ok) throw new Error(`Could not load ${cfg.file}`);
-          pendingCsvText = await response.text();
-          selectedExamKey = key;
-          selectedExamName = cfg.name;
-          selectedExamRecordsResults = cfg.recordResults;
-          prepareInstructionsFromCsv(pendingCsvText);
-        } catch (err) {
-          els.selectionError.textContent = `${cfg.name} is not yet available on this build. Add ${cfg.file} beside this HTML file when deploying.`;
-        } finally {
-          btn.disabled = false;
-          btn.textContent = original;
-        }
-      });
     });
 
     els.selectCustom.addEventListener('click', () => {
@@ -394,6 +465,7 @@
         selectedExamKey = 'custom';
         selectedExamName = file.name.replace(/\.csv$/i,'') || 'Custom practice set';
         selectedExamRecordsResults = false;
+        selectedExamSecondsPerQuestion = CONFIG.secondsPerQuestion;
         prepareInstructionsFromCsv(pendingCsvText);
       };
       reader.readAsText(file);
@@ -408,9 +480,9 @@
         return;
       }
       questions = parsed;
-      const totalSeconds = questions.length * CONFIG.secondsPerQuestion;
+      const totalSeconds = questions.length * selectedExamSecondsPerQuestion;
       els.instructionsTitle.textContent = selectedExamName + ' — Instructions';
-      els.timingNote.textContent = `This examination contains ${questions.length} question${questions.length===1?'':'s'} and allows ${formatDuration(totalSeconds)} (${CONFIG.secondsPerQuestion} seconds per question).`;
+      els.timingNote.textContent = `This examination contains ${questions.length} question${questions.length===1?'':'s'} and allows ${formatDuration(totalSeconds)} (${selectedExamSecondsPerQuestion} seconds per question).`;
       showOnly(els.instructionsScreen);
     }
 
@@ -423,7 +495,10 @@
       renderSidebar();
       showQuestion();
       examStartedAt = new Date();
-      startTimer(questions.length * CONFIG.secondsPerQuestion);
+      examEndsAt = new Date(examStartedAt.getTime() + (questions.length * selectedExamSecondsPerQuestion * 1000));
+      saveRecoveryState();
+      startRecoveryAutosave();
+      startTimerUntil(examEndsAt);
     });
 
     function showOnly(screen) {
@@ -434,6 +509,8 @@
     }
 
     function resetExamStateForStart() {
+      stopRecoveryAutosave();
+      clearInterval(timerInterval);
       userAnswers = {};
       flaggedQuestions = new Set();
       strikeState = {};
@@ -551,6 +628,7 @@
       els.fFlagged.setAttribute('aria-pressed', String(next==='flagged'));
       els.fUnanswered.setAttribute('aria-pressed', String(next==='unanswered'));
       renderSidebar();
+      saveRecoveryState();
     }
 
     function matchesFilter(i) {
@@ -570,6 +648,7 @@
       if (i < 0 || i >= questions.length) return;
       currentQuestionIndex = i;
       showQuestion();
+      saveRecoveryState();
     }
 
     function showQuestion() {
@@ -596,6 +675,7 @@
           userAnswers[currentQuestionIndex] = a.text;
           updateSidebarState();
           showQuestion();
+          saveRecoveryState();
         });
 
         const label = document.createElement('label');
@@ -629,6 +709,7 @@
       const set = strikeState[qIndex];
       if (set.has(letter)) { set.delete(letter); labelEl.classList.remove('strike'); }
       else { set.add(letter); labelEl.classList.add('strike'); }
+      saveRecoveryState();
     }
 
     function toggleFlag() {
@@ -637,6 +718,7 @@
       else flaggedQuestions.add(currentQuestionIndex);
       updateSidebarState();
       showQuestion();
+      saveRecoveryState();
     }
 
     function updateSidebarState() {
@@ -654,16 +736,17 @@
     }
 
     // ---------------- TIMER ----------------
-    function startTimer(totalSeconds) {
+    function startTimerUntil(endTime) {
       clearInterval(timerInterval);
-      let seconds = totalSeconds;
+      const endMs = endTime instanceof Date ? endTime.getTime() : new Date(endTime).getTime();
       const tick = () => {
+        if (finished) { clearInterval(timerInterval); return; }
+        const seconds = Math.max(0, Math.ceil((endMs - Date.now()) / 1000));
         const hrs = String(Math.floor(seconds / 3600)).padStart(2,'0');
         const mins = String(Math.floor((seconds % 3600) / 60)).padStart(2,'0');
         const secs = String(seconds % 60).padStart(2,'0');
         els.timer.textContent = `${hrs}:${mins}:${secs}`;
-        if (finished) { clearInterval(timerInterval); return; }
-        if (seconds-- <= 0) {
+        if (seconds <= 0) {
           clearInterval(timerInterval);
           finishExam(true);
         }
@@ -678,6 +761,155 @@
       const h = Math.floor(mins / 60), m = mins % 60;
       return `${h} hour${h===1?'':'s'}${m ? ` ${m} minutes` : ''}`;
     }
+
+    // ---------------- LOCAL RECOVERY / AUTOSAVE ----------------
+    function serialiseStrikeState() {
+      const out = {};
+      Object.keys(strikeState).forEach(k => out[k] = Array.from(strikeState[k] || []));
+      return out;
+    }
+
+    function deserialiseStrikeState(saved) {
+      const out = {};
+      questions.forEach((_,i) => out[i] = new Set(Array.isArray(saved?.[i]) ? saved[i] : []));
+      return out;
+    }
+
+    function saveRecoveryState() {
+      if (!examStartedAt || finished || !questions.length) return;
+      try {
+        const state = {
+          version: 1,
+          savedAt: new Date().toISOString(),
+          candidateName,
+          selectedExamKey,
+          selectedExamName,
+          selectedExamRecordsResults,
+          selectedExamSecondsPerQuestion,
+          pendingCsvText,
+          userAnswers,
+          flaggedQuestions: Array.from(flaggedQuestions),
+          strikeState: serialiseStrikeState(),
+          currentQuestionIndex,
+          currentFilter,
+          examStartedAt: examStartedAt.toISOString(),
+          examEndsAt: examEndsAt ? examEndsAt.toISOString() : ''
+        };
+        localStorage.setItem(CONFIG.recoveryKey, JSON.stringify(state));
+        if (els.autosaveStatus) els.autosaveStatus.textContent = `Saved locally ${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
+      } catch (err) {
+        if (els.autosaveStatus) els.autosaveStatus.textContent = 'Local autosave unavailable';
+      }
+    }
+
+    function getRecoveryState() {
+      try {
+        const raw = localStorage.getItem(CONFIG.recoveryKey);
+        if (!raw) return null;
+        const state = JSON.parse(raw);
+        if (!state || !state.pendingCsvText || !state.examStartedAt || !state.examEndsAt) return null;
+        return state;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function clearRecoveryState() {
+      try { localStorage.removeItem(CONFIG.recoveryKey); } catch (_) {}
+      stopRecoveryAutosave();
+      if (els.recoveryBox) els.recoveryBox.classList.add('hidden');
+    }
+
+    function startRecoveryAutosave() {
+      stopRecoveryAutosave();
+      recoveryAutosaveInterval = setInterval(saveRecoveryState, 5000);
+    }
+
+    function stopRecoveryAutosave() {
+      if (recoveryAutosaveInterval) clearInterval(recoveryAutosaveInterval);
+      recoveryAutosaveInterval = null;
+    }
+
+    function showRecoveryPromptIfAvailable() {
+      const saved = getRecoveryState();
+      if (!saved) {
+        els.recoveryBox.classList.add('hidden');
+        return;
+      }
+      els.candidateName.value = saved.candidateName || '';
+      const savedAt = saved.savedAt ? new Date(saved.savedAt).toLocaleString() : 'previously';
+      els.recoverySummary.textContent = `${saved.candidateName || 'Candidate'} — ${saved.selectedExamName || 'saved examination'} — last saved ${savedAt}.`;
+      els.recoveryBox.classList.remove('hidden');
+    }
+
+    els.resumeAttempt.addEventListener('click', () => {
+      const pwd = els.candidatePassword.value.trim();
+      if (pwd !== CONFIG.password) {
+        els.loginError.textContent = 'Enter the correct password to resume the saved attempt.';
+        return;
+      }
+      const saved = getRecoveryState();
+      if (!saved) {
+        els.loginError.textContent = 'No recoverable attempt was found.';
+        showRecoveryPromptIfAvailable();
+        return;
+      }
+
+      const restoredQuestions = parseCsvToQuestions(saved.pendingCsvText);
+      if (!restoredQuestions.length) {
+        els.loginError.textContent = 'The saved attempt could not be restored.';
+        return;
+      }
+
+      candidateName = saved.candidateName || els.candidateName.value.trim();
+      selectedExamKey = saved.selectedExamKey || 'recovered';
+      selectedExamName = saved.selectedExamName || 'Recovered examination';
+      selectedExamRecordsResults = !!saved.selectedExamRecordsResults;
+      selectedExamSecondsPerQuestion = Number(saved.selectedExamSecondsPerQuestion || CONFIG.secondsPerQuestion);
+      pendingCsvText = saved.pendingCsvText;
+      questions = restoredQuestions;
+      userAnswers = saved.userAnswers || {};
+      flaggedQuestions = new Set(Array.isArray(saved.flaggedQuestions) ? saved.flaggedQuestions : []);
+      strikeState = deserialiseStrikeState(saved.strikeState || {});
+      currentQuestionIndex = Math.max(0, Math.min(Number(saved.currentQuestionIndex || 0), questions.length - 1));
+      currentFilter = ['all','flagged','unanswered'].includes(saved.currentFilter) ? saved.currentFilter : 'all';
+      examStartedAt = new Date(saved.examStartedAt);
+      examEndsAt = new Date(saved.examEndsAt);
+      finished = false;
+      highlightMode = false;
+
+      els.fAll.setAttribute('aria-pressed', String(currentFilter==='all'));
+      els.fFlagged.setAttribute('aria-pressed', String(currentFilter==='flagged'));
+      els.fUnanswered.setAttribute('aria-pressed', String(currentFilter==='unanswered'));
+      els.loginError.textContent = '';
+      els.welcomeScreen.classList.add('hidden');
+      els.selectionScreen.classList.add('hidden');
+      els.instructionsScreen.classList.add('hidden');
+      els.reviewPage.style.display = 'none';
+      els.examShell.style.display = 'flex';
+      els.sidebar.style.display = 'block';
+      els.prev.disabled = false;
+      els.next.disabled = false;
+      els.flag.disabled = false;
+      els.finish.disabled = false;
+      els.examNameHeader.textContent = selectedExamName;
+      renderSidebar();
+      showQuestion();
+      startRecoveryAutosave();
+      startTimerUntil(examEndsAt);
+    });
+
+    els.discardAttempt.addEventListener('click', () => {
+      clearRecoveryState();
+      els.recoverySummary.textContent = '';
+      els.loginError.textContent = '';
+    });
+
+    window.addEventListener('pagehide', saveRecoveryState);
+    window.addEventListener('beforeunload', saveRecoveryState);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) saveRecoveryState();
+    });
 
     // ---------------- FINISH / REVIEW ----------------
     function openFinishModal() {
@@ -694,6 +926,7 @@
       finished = true;
       examSubmittedAt = new Date();
       clearInterval(timerInterval);
+      stopRecoveryAutosave();
       closeFinishModal();
       els.prev.disabled = true;
       els.next.disabled = true;
@@ -731,7 +964,13 @@
       els.examShell.style.display = 'none';
       els.reviewPage.style.display = 'block';
 
-      if (selectedExamRecordsResults) await submitResultsToGoogleSheet(results, correctCount, total, percent, unanswered, autoByTimer);
+      if (selectedExamRecordsResults) {
+        const sent = await submitResultsToGoogleSheet(results, correctCount, total, percent, unanswered, autoByTimer);
+        if (sent) clearRecoveryState();
+        else els.submissionStatus.textContent += ' A local recovery copy has been retained on this device.';
+      } else {
+        clearRecoveryState();
+      }
     }
 
     function downloadResultsCsv(results, correctCount, total, percent) {
@@ -775,7 +1014,7 @@
     async function submitResultsToGoogleSheet(results, correctCount, total, percent, unanswered, autoByTimer) {
       if (!CONFIG.googleScriptUrl) {
         els.submissionStatus.textContent += ' Central results recording is not connected yet.';
-        return;
+        return false;
       }
       const payload = {
         candidateName,
@@ -806,8 +1045,10 @@
           body:JSON.stringify(payload)
         });
         els.submissionStatus.textContent += ' Results submission sent centrally.';
+        return true;
       } catch (err) {
         els.submissionStatus.textContent += ' Results could not be recorded centrally; please retain the downloaded CSV.';
+        return false;
       }
     }
 
